@@ -214,6 +214,12 @@ copy "$(TargetDir)EasyHook32.lib" "$(TargetDir)..\x64\EasyHook32.lib"</Command>
     <MASM>
       <UseSafeExceptionHandlers>false</UseSafeExceptionHandlers>
     </MASM>
+    <PreBuildEvent>
+      <Command>TASKKILL /IM EasyHookSvc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook64Svc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook32Svc.exe /F 2&gt; NUL
+EXIT 0</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='netfx4-Debug|Win32'">
     <ClCompile>
@@ -249,6 +255,12 @@ copy "$(TargetDir)EasyHook32.lib" "$(TargetDir)..\x64\EasyHook32.lib"</Command>
     <MASM>
       <UseSafeExceptionHandlers>false</UseSafeExceptionHandlers>
     </MASM>
+    <PreBuildEvent>
+      <Command>TASKKILL /IM EasyHookSvc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook64Svc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook32Svc.exe /F 2&gt; NUL
+EXIT 0</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='netfx3.5-Debug|x64'">
     <Midl>
@@ -285,6 +297,12 @@ copy "$(TargetDir)EasyHook64.lib" "$(TargetDir)..\x86\EasyHook64.lib"</Command>
     <MASM>
       <UseSafeExceptionHandlers>false</UseSafeExceptionHandlers>
     </MASM>
+    <PreBuildEvent>
+      <Command>TASKKILL /IM EasyHookSvc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook64Svc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook32Svc.exe /F 2&gt; NUL
+EXIT 0</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='netfx4-Debug|x64'">
     <Midl>
@@ -321,6 +339,12 @@ copy "$(TargetDir)EasyHook64.lib" "$(TargetDir)..\x86\EasyHook64.lib"</Command>
     <MASM>
       <UseSafeExceptionHandlers>false</UseSafeExceptionHandlers>
     </MASM>
+    <PreBuildEvent>
+      <Command>TASKKILL /IM EasyHookSvc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook64Svc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook32Svc.exe /F 2&gt; NUL
+EXIT 0</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='netfx3.5-Release|Win32'">
     <ClCompile>
@@ -363,6 +387,12 @@ copy "$(TargetDir)EasyHook32.lib" "$(TargetDir)..\x64\EasyHook32.lib"</Command>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <UseSafeExceptionHandlers>false</UseSafeExceptionHandlers>
     </MASM>
+    <PreBuildEvent>
+      <Command>TASKKILL /IM EasyHookSvc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook64Svc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook32Svc.exe /F 2&gt; NUL
+EXIT 0</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='netfx4-Release|Win32'">
     <ClCompile>
@@ -405,6 +435,12 @@ copy "$(TargetDir)EasyHook32.lib" "$(TargetDir)..\x64\EasyHook32.lib"</Command>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <UseSafeExceptionHandlers>false</UseSafeExceptionHandlers>
     </MASM>
+    <PreBuildEvent>
+      <Command>TASKKILL /IM EasyHookSvc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook64Svc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook32Svc.exe /F 2&gt; NUL
+EXIT 0</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='netfx3.5-Release|x64'">
     <Midl>
@@ -447,6 +483,12 @@ copy "$(TargetDir)EasyHook64.lib" "$(TargetDir)..\x86\EasyHook64.lib"</Command>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <UseSafeExceptionHandlers>false</UseSafeExceptionHandlers>
     </MASM>
+    <PreBuildEvent>
+      <Command>TASKKILL /IM EasyHookSvc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook64Svc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook32Svc.exe /F 2&gt; NUL
+EXIT 0</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='netfx4-Release|x64'">
     <Midl>
@@ -468,7 +510,7 @@ copy "$(TargetDir)EasyHook64.lib" "$(TargetDir)..\x86\EasyHook64.lib"</Command>
       <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CallingConvention>StdCall</CallingConvention>
-      <CompileAs>CompileAsCpp</CompileAs>
+      <CompileAs>Default</CompileAs>
       <ForcedIncludeFiles>%(ForcedIncludeFiles)</ForcedIncludeFiles>
       <ExceptionHandling>Async</ExceptionHandling>
     </ClCompile>
@@ -489,6 +531,12 @@ copy "$(TargetDir)EasyHook64.lib" "$(TargetDir)..\x86\EasyHook64.lib"</Command>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <UseSafeExceptionHandlers>false</UseSafeExceptionHandlers>
     </MASM>
+    <PreBuildEvent>
+      <Command>TASKKILL /IM EasyHookSvc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook64Svc.exe /F 2&gt; NUL
+TASKKILL /IM EasyHook32Svc.exe /F 2&gt; NUL
+EXIT 0</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\DriverShared\Disassembler\libudis86\decode.c">
@@ -687,6 +735,7 @@ ml.exe /D_WIN32 /c /Cx "%(FullPath)"
     <ClInclude Include="..\DriverShared\Disassembler\udis86.h" />
     <ClInclude Include="..\DriverShared\DriverShared.h" />
     <ClInclude Include="..\Public\easyhook.h" />
+    <ClInclude Include="ExceptionUnwind.h" />
     <ClInclude Include="ntstatus.h" />
     <ClInclude Include="..\DriverShared\rtl.h" />
     <ClInclude Include="resource.h" />

@@ -603,8 +603,22 @@ namespace EasyHook
 
         public static void LhBarrierEndStackTrace(IntPtr OutBackup)
         {
-            if (Is64Bit) Force( NativeAPI_x64.LhBarrierEndStackTrace(OutBackup));
-            else Force( NativeAPI_x86.LhBarrierEndStackTrace(OutBackup));
+            try
+            {
+                if (Is64Bit)
+                {
+                    Force(NativeAPI_x64.LhBarrierEndStackTrace(OutBackup));
+                }
+                else
+                {
+                    Force(NativeAPI_x86.LhBarrierEndStackTrace(OutBackup));
+                }
+            }
+            catch(ArgumentException ex)
+            {
+                throw new ArgumentException(String.Format("The passed OutBackup pointer was: {0:X}", OutBackup.ToInt64()), ex);
+            }
+
         }
 
         public static void DbgAttachDebugger()

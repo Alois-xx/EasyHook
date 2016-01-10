@@ -149,12 +149,25 @@ CALL_NET_ENTRY:
 		jmp TRAMPOLINE_EXIT
 		
 CALL_HOOK_HANDLER:
-; adjust return address --- ATTENTION: this offset "83h" will also change if CALL_NET_OUTRO moves due to changes...
+; adjust return address --- ATTENTION: this offset "83h" will also change if Trampoline_ASM_x86_Net_Outro moves due to changes...
 	mov dword ptr [esp + 8], 1A2B3C04h
 
 ; call hook handler
 	mov eax, 1A2B3C00h
-	jmp TRAMPOLINE_EXIT 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; generic outro for both cases...
+TRAMPOLINE_EXIT:
+
+	pop edx
+	pop ecx
+	
+	jmp eax ; ATTENTION: In case of hook handler we will return to Trampoline_ASM_x86_Net_Outro, otherwise to the caller...
+Trampoline_ASM_x86@0 ENDP
+
+
+public Trampoline_ASM_x86_Net_Outro@0
+
+Trampoline_ASM_x86_Net_Outro@0 PROC
 
 CALL_NET_OUTRO: ; this is where the handler returns...
 
@@ -178,22 +191,13 @@ CALL_NET_OUTRO: ; this is where the handler returns...
 	
 ; finally return to saved return address - the caller of this trampoline...
 	ret
-	
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; generic outro for both cases...
-TRAMPOLINE_EXIT:
 
-	pop edx
-	pop ecx
-	
-	jmp eax ; ATTENTION: In case of hook handler we will return to CALL_NET_OUTRO, otherwise to the caller...
-	
-; outro signature, to automatically determine code size
+	; outro signature, to automatically determine code size
 	db 78h
 	db 56h
 	db 34h
 	db 12h
-
-Trampoline_ASM_x86@0 ENDP
+Trampoline_ASM_x86_Net_Outro@0 ENDP	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; HookInjectionCode_ASM_x86

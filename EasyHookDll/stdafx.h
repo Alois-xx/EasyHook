@@ -72,6 +72,14 @@ void LhBarrierThreadDetach();
 NTSTATUS LhBarrierProcessAttach();
 void LhBarrierProcessDetach();
 ULONGLONG LhBarrierIntro(LOCAL_HOOK_INFO* InHandle, void* InRetAddr, void** InAddrOfRetAddr);
+// Not Exported 
+NTSTATUS LhPatchHookReturnAddress(PVOID __out *OriginalHookReturnAddress);
+NTSTATUS LhBackPatchHookReturnAddress(PVOID __in pOriginalStackAddress);
+
+UCHAR* GetNetOutroPtr();
+UCHAR* GetTrampolinePtr();
+ULONG GetTrampolineSize();
+
 void* __stdcall LhBarrierOutro(LOCAL_HOOK_INFO* InHandle, void** InAddrOfRetAddr);
 
 LONG DbgRelocateRIPRelative(
@@ -86,6 +94,8 @@ extern HMODULE             hNtDll;
 extern HMODULE             hKernel32;
 extern HMODULE             hCurrentModule;
 extern HANDLE              hEasyHookHeap;
+extern UINT_PTR           GlobalHookReturnAddresses[];
+
 
 // this is just to make machine code management easier
 #define WRAP_ULONG64(Decl)\

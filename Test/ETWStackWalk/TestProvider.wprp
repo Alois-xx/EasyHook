@@ -1,0 +1,21 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WindowsPerformanceRecorder Version="1.0">
+  <Profiles>
+    <EventCollector Id="EventCollector_MyEventSource" Name="TestProvider">
+      <BufferSize Value="1024" />
+      <Buffers Value="20" />
+    </EventCollector>
+    <EventProvider Id="TestProvider" Name="C0899B1A-6345-4E8F-9B6B-13E44A7ED5BA" Stack="true" /> <!--Stack="true"-->
+
+    <Profile Id="TestProvider.Verbose.File" Name="TestProvider" Description="Console Traces" LoggingMode="File" DetailLevel="Verbose">
+      <Collectors Operation="Add">
+        <EventCollectorId Value="EventCollector_MyEventSource">
+          <EventProviders>
+            <EventProviderId Value="TestProvider" />
+          </EventProviders>
+        </EventCollectorId>
+      </Collectors>
+    </Profile>
+    <Profile Id="TestProvider.Verbose.Memory" Name="TestProvider" Description="Hook Events" Base="TestProvider.Verbose.File" LoggingMode="Memory" DetailLevel="Verbose" />
+  </Profiles>
+</WindowsPerformanceRecorder>

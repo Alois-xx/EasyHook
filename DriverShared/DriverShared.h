@@ -38,6 +38,7 @@ extern "C"{
 
 
 #include "rtl.h"
+#include "ExceptionUnwind.h"
 
 #define EASYHOOK_NT_INTERNAL            EXTERN_C NTSTATUS __stdcall
 #define EASYHOOK_BOOL_INTERNAL          EXTERN_C BOOL __stdcall
@@ -76,7 +77,21 @@ typedef struct _LOCAL_HOOK_INFO_
 	HOOK_ACL				LocalACL;
     ULONG                   Signature;
     TRACED_HOOK_HANDLE      Tracking;
+#ifdef _M_X64
+	// Exception unwinding works differently in x64 than in 32 bits 
+	// We need to add unwind information to our trampoline code to get walkable stacks inside a debugger or to enable proper x64 stackwalking
+	// to enable 
+	_IMAGE_RUNTIME_FUNCTION_ENTRY  Trampoline_RuntimeFunction;
+	UNWIND_INFO                    Trampoline_UnwindInfo;
+	UNWIND_CODE                    Trampoline_UnwindCodes[20]; // placeholder for enough unwind codes regardless if between UnwindInfo and this member some alignment nops are inserted by the compiler
+	ULONG                          DummyExceptionHandler;
 
+	_IMAGE_RUNTIME_FUNCTION_ENTRY  Trampoline_Net_Outro_RuntimeFunction;
+	UNWIND_INFO					   Trampoline_Net_Outro_UnwindInfo;
+	UNWIND_CODE                    Trampoline_Net_Outro_UnwindCodes[20]; // placeholder for enough unwind codes regardless if between UnwindInfo and this member some alignment nops are inserted by the compiler
+	ULONG                          DummyExceptionHandler2;
+
+#endif
 	void*					RandomValue; // fixed
 	void*					HookIntro; // fixed
 	UCHAR*					OldProc; // fixed

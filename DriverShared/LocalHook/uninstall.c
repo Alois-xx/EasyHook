@@ -64,6 +64,18 @@ Parameters:
 
                 IsAllocated = TRUE;
             }
+			BOOL bFound = FALSE;
+			for (int i = 0; i < MAX_HOOK_COUNT; i++)
+			{
+				UINT_PTR hookTrampline = (UINT_PTR) Hook->Trampoline;
+				
+				if ( GlobalHookReturnAddresses[i] > hookTrampline &&  GlobalHookReturnAddresses[i] < hookTrampline+500)  // hook return address must be near the trampline asesembler code
+				{
+					bFound = TRUE;
+					GlobalHookReturnAddresses[i] = 0;
+				}
+			}
+			ASSERT(bFound, L"Did not find hook return address in GlobalHookRetunAddreses list which should be there during hook unregister!");
         }
 
         if(!IsAllocated)
@@ -142,6 +154,8 @@ Description:
             GlobalRemovalListHead.Next = Hook;
         }
 
+		RtlZeroMemory(&GlobalHookReturnAddresses[0], sizeof(UINT_PTR)*MAX_HOOK_COUNT);
+
 		GlobalHookListHead.Next = NULL;
     }
     RtlReleaseLock(&GlobalHookLock);
@@ -203,7 +217,12 @@ Descriptions:
             CurrentIRQL = KeGetCurrentIrql();
             RtlWPOff();
 #endif
-            *((ULONGLONG*)Hook->TargetProc) = Hook->TargetBackup;
+			*((ULONGLONG*)Hook->TargetProc) = Hook->TargetBackup;
+#ifdef _M_X64
+			// Remove exception unwind infos as well. 
+			RtlDeleteFunctionTable(&Hook->Trampoline_RuntimeFunction);
+			RtlDeleteFunctionTable(&Hook->Trampoline_Net_Outro_RuntimeFunction);
+#endif
 #ifdef X64_DRIVER
             *((ULONGLONG*)(Hook->TargetProc + 8)) = Hook->TargetBackup_x64;
             RtlWPOn(CurrentIRQL);

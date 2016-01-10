@@ -24,7 +24,7 @@
 // about the project and latest updates.
 
 #include "stdafx.h"
-
+#include <intrin.h>
 /*
 I am using a >>well known<< library to check for OS loader lock ;-)
 */
@@ -51,6 +51,10 @@ typedef struct _THREAD_RUNTIME_INFO_
 	RUNTIME_INFO*		Current;
 	void*				Callback;
 	BOOL				IsProtected;
+	PUINT_PTR           FirstHookReturnAddress;   // address of Trampoline_ASM_x64_Net_Outro which is set after the hooked method has been intercepted
+	int                 ReentrantCounter;         // Further recursive hook invocations only increment the counter but to not overwrite the FirstHookReturnAddress
+	PUINT_PTR           StackPointerOfReplacedReturnAddress;    // This is set if LhBarrierBeginStackTrace was called outside a hook handler to allow stack traces even outside a hook handler
+	int                 LastStackIndex;           // RSP relative index where the FirstHookReturnAddress was found last time to start searching the stack at the right location fast.
 }THREAD_RUNTIME_INFO, *LPTHREAD_RUNTIME_INFO;
 
 typedef struct _THREAD_LOCAL_STORAGE_
@@ -482,7 +486,6 @@ FINALLY_OUTRO:
 
 
 
-
 EASYHOOK_NT_EXPORT LhBarrierGetReturnAddress(PVOID* OutValue)
 {
 /*
@@ -519,8 +522,6 @@ FINALLY_OUTRO:
 
 
 
-
-
 EASYHOOK_NT_EXPORT LhBarrierGetAddressOfReturnAddress(PVOID** OutValue)
 {
 /*
@@ -553,8 +554,6 @@ FINALLY_OUTRO:
 
 
 
-
-
 EASYHOOK_NT_EXPORT LhBarrierBeginStackTrace(PVOID* OutBackup)
 {
 /*
@@ -577,11 +576,17 @@ Description:
 	if(!TlsGetCurrentValue(&Unit.TLS, &Runtime))
         THROW(STATUS_NOT_SUPPORTED, L"The caller is not inside a hook handler.");
 
-	if(Runtime->Current == NULL)
-		THROW(STATUS_NOT_SUPPORTED, L"The caller is not inside a hook handler.");
-
-    *OutBackup = *Runtime->Current->AddrOfRetAddr;
-    *Runtime->Current->AddrOfRetAddr = Runtime->Current->RetAddress;
+	if (Runtime->Current == NULL) // The caller is not inside a hook handler. Use alternate backpatching method by searching the local stack for the hook specific assembler return address
+	{
+		NtStatus = LhPatchHookReturnAddress(OutBackup);
+		if( NtStatus != STATUS_SUCCESS )
+			THROW(NtStatus, L"LhGetReturnAddress outside a hook handler did fail");
+	}
+	else
+	{
+		*OutBackup = *Runtime->Current->AddrOfRetAddr;
+		*Runtime->Current->AddrOfRetAddr = Runtime->Current->RetAddress;
+	}
 
     RETURN;
 
@@ -612,9 +617,17 @@ Description:
     if(!IsValidPointer(InBackup, 1))
         THROW(STATUS_INVALID_PARAMETER, L"The given stack backup pointer is invalid.");
 
-    FORCE(LhBarrierGetAddressOfReturnAddress(&AddrOfRetAddr));
-
-    *AddrOfRetAddr = InBackup;
+    NtStatus = LhBarrierGetAddressOfReturnAddress(&AddrOfRetAddr);
+	if (!RTL_SUCCESS(NtStatus))
+	{
+		// try alternate backpatching for x64 stackwalks outside of hook handlers
+		FORCE(LhBackPatchHookReturnAddress(InBackup));
+	}
+	else
+	{
+		*AddrOfRetAddr = InBackup;
+	}
+    
 
     RETURN;
 
@@ -793,6 +806,14 @@ Description:
 			goto DONT_INTERCEPT;
 	}
 
+	if (Info->FirstHookReturnAddress == NULL)
+	{
+		Info->FirstHookReturnAddress = (PUINT_PTR) InRetAddr;
+		Info->ReentrantCounter++;
+	}
+
+	ASSERT(Info->StackPointerOfReplacedReturnAddress == NULL, L"You did call LhBarrierBeginStacktrace but not LhBarrierEndStacktrace before leaving your hooked method. Please fix your hook handler.");
+	
 	// get hook runtime info...
 	Runtime = &Info->Entries[InHandle->HLSIndex];
 
@@ -856,9 +877,107 @@ DONT_INTERCEPT:
 	return FALSE;
 }
 
+typedef struct _TEB_ {
+	PVOID ExceptionList;
+	PVOID StackBase;
+	PVOID StackLimit;
+} TEB_, *PTEB_;
 
+#define MAX_STACK_SEARCH_DEPTH 50*1000
 
+LPTHREAD_RUNTIME_INFO GetRuntimeInfo()
+{
+	LPTHREAD_RUNTIME_INFO	Info;
 
+	ASSERT(AcquireSelfProtection(), L"barrier.c - AcquireSelfProtection()");
+
+	ASSERT(TlsGetCurrentValue(&Unit.TLS, &Info) && (Info != NULL), L"barrier.c - TlsGetCurrentValue(&Unit.TLS, &Info) && (Info != NULL)");
+
+	ReleaseSelfProtection();
+
+	return Info;
+}
+
+PUINT_PTR GetStackBaseAddress()
+{
+	TEB_ *pTeb = (TEB_ *)NtCurrentTeb();
+	return (PUINT_PTR) pTeb->StackBase;
+}
+
+NTSTATUS LhBackPatchHookReturnAddress(PVOID __in pOriginalStackAddress)
+{
+	LPTHREAD_RUNTIME_INFO	Info = GetRuntimeInfo();
+
+	ASSERT(Info->StackPointerOfReplacedReturnAddress != NULL, L"ReplacedReturnAddress was null. Either LhBeginStacktrace was not called before or you did tinker with Easyhook source code in LhPatchHookReturnAddress.");
+	
+	PUINT_PTR pStack = Info->StackPointerOfReplacedReturnAddress;
+	printf("Patching Address: %p with value %p to %p", pStack, *pStack, pOriginalStackAddress);
+	*pStack = (UINT_PTR)pOriginalStackAddress; // overwrite return address of assembler stub 
+
+	Info->StackPointerOfReplacedReturnAddress = NULL; // reset it so we can track violators of the contract in LhBarrierIntro
+
+	return  STATUS_SUCCESS;
+}
+
+/*
+
+*/
+NTSTATUS LhPatchHookReturnAddress(PVOID __out *OriginalHookReturnAddress)
+{
+	LPTHREAD_RUNTIME_INFO	Info = GetRuntimeInfo();
+	PUINT_PTR pStackUpperLimit = GetStackBaseAddress(); // get from TEB the highest stack address which is the address where the stack did stack
+	                                                 
+	BOOL bFound = FALSE;
+	BOOL bStartatLastIdx = TRUE;
+	int i = Info->LastStackIndex;   // use cached index which should be constant anyway because the stack layout should always be the same between our hook method and our return address.
+	PUINT_PTR pStackPointer = (PUINT_PTR)_AddressOfReturnAddress();
+	UINT_PTR address;
+	PUINT_PTR pCurrentStackPtr;
+Retry:
+	for (; i < MAX_STACK_SEARCH_DEPTH && !bFound; i++) // search towards higher addresses on the stack which must contain the address of our callers
+	{
+		pCurrentStackPtr = pStackPointer + i;  // walk stack with pointer granularity because the return addresses should be at least pointer aligned
+		if(pCurrentStackPtr >= pStackUpperLimit  )
+		{
+			if (bStartatLastIdx && Info->LastStackIndex > 0)
+			{
+				bStartatLastIdx = FALSE;
+				i = 0;
+				goto Retry;
+			}
+			else
+			{
+				ASSERT(FALSE, L"Did search entire stack for hook return addresses but did not find any.");
+				return STATUS_INTERNAL_ERROR;
+			}
+		}
+
+		address = *pCurrentStackPtr;
+		if( i == 0 )
+			printf("\nStackPtr: %p, Address: %p, HookReturnAddress: %p", pCurrentStackPtr, address, GlobalHookReturnAddresses[0]);
+
+		for (int k = 0; k < MAX_HOOK_COUNT; k++)
+		{
+			if (GlobalHookReturnAddresses[k] == 0)
+			{
+				break;
+			}
+			else if( GlobalHookReturnAddresses[k]  == address) // we have found a candidate to overwrite
+			{
+				Info->LastStackIndex = i;                         // cache stack index which should be constant for all subsequent invocations. If not we search from the current stack backwards until we find it again
+				Info->StackPointerOfReplacedReturnAddress = pCurrentStackPtr;  // save stack patch location in TLS so we can patch it back again in LhBarrierEndStackTrace
+				*OriginalHookReturnAddress = (PVOID) *pCurrentStackPtr;     // write original return address as out argument which is later used to patch it back again.
+				*pCurrentStackPtr = *Info->FirstHookReturnAddress; // overwrite return address to enable proper x64 stackwalking in x86 this is not necessary to get proper ETW stackwalks
+				printf("\nFound at idx %d, StackPtr: %p", i, pCurrentStackPtr);
+				bFound = TRUE;
+				break;
+			}
+		}
+
+	}
+
+	return bFound ? STATUS_SUCCESS : STATUS_INTERNAL_ERROR;
+}
 
 void* __stdcall LhBarrierOutro(LOCAL_HOOK_INFO* InHandle, void** InAddrOfRetAddr)
 {
@@ -887,6 +1006,14 @@ Description:
 	// leave handler context
 	Info->Current = NULL;
 	Info->Callback = NULL;
+
+	Info->ReentrantCounter--;
+	if (Info->ReentrantCounter <= 0)
+	{
+		Info->FirstHookReturnAddress = NULL;
+		Info->ReentrantCounter = 0;
+	}
+
 
 	ASSERT(Runtime != NULL,L"barrier.c - Runtime != NULL");
 

@@ -108,12 +108,8 @@ StealthStub_ASM_x64 ENDP
 ; prevents the SMC condition and uses RIP relative jumps...
 
 
-public Trampoline_ASM_x64
-
-Trampoline_ASM_x64 PROC
-
 NETIntro:
-	;void*			NETEntry; // fixed 0 (0) 
+	;void*			HookIntro -> LhBarrierIntro; // fixed 0 (0) 
 	db 0
 	db 0
 	db 0
@@ -124,7 +120,7 @@ NETIntro:
 	db 0
 	
 OldProc:
-	;BYTE*			OldProc; // fixed 4 (8)  
+	;BYTE*			OldProc; // fixed 4 (8)  set by LhRelocateEntryPoint which points to generated code to an absolute jump just after the Trampoline code here
 	db 0
 	db 0
 	db 0
@@ -134,8 +130,8 @@ OldProc:
 	db 0
 	db 0
 	
-NewProc:
-	;BYTE*			NewProc; // fixed 8 (16) 
+HookProc:
+	;BYTE*			HookProc; // fixed 8 (16) set by LhAllocateHook with value of InHookProc
 	db 0
 	db 0
 	db 0
@@ -145,8 +141,8 @@ NewProc:
 	db 0
 	db 0
 	
-NETOutro:
-	;void*			NETOutro; // fixed 12 (24) 
+HookOutro:
+	;void*			HookOutro -> LhBarrierOutro; // fixed 12 (24) 
 	db 0
 	db 0
 	db 0
@@ -157,7 +153,7 @@ NETOutro:
 	db 0
 	
 IsExecutedPtr:
-	;size_t*		IsExecutedPtr; // fixed 16 (32) 
+	;size_t*		IsExecutedPtr; // fixed 16 (32)  set by LhAllocateHook to  (int*)((UCHAR*)Hook + 2048); pointer to integer which gets the number of recursive entries
 	db 0
 	db 0
 	db 0
@@ -166,30 +162,32 @@ IsExecutedPtr:
 	db 0
 	db 0
 	db 0
-	
-; ATTENTION: 64-Bit requires stack alignment (RSP) of 16 bytes!!
+
+public Trampoline_ASM_x64
+
+Trampoline_ASM_x64 PROC
+; ATTENTION: 64-Bit requires stack alignment (RSP) of 16 bytes!!\
 	mov rax, rsp
 	push rcx ; save not sanitized registers...
 	push rdx
 	push r8
 	push r9
+	push rbp
+
+	sub rsp, 4 * 16 + 32 + 8; space for SSE registers and shadow space + 8 byte for 16 byte alignment
+	lea rbp,[rsp]  ; establish  a dummy frame pointer to enable proper x64 stack unwinding otherwise the stackwalker will not work!
 	
-	sub rsp, 4 * 16 ; space for SSE registers
-	
-	movups [rsp + 3 * 16], xmm0
-	movups [rsp + 2 * 16], xmm1
-	movups [rsp + 1 * 16], xmm2
-	movups [rsp + 0 * 16], xmm3
-	
-	sub rsp, 32; shadow space for method calls
-	
+	movups [rsp + 3 * 16 + 32 + 8], xmm0
+	movups [rsp + 2 * 16 + 32 + 8], xmm1
+	movups [rsp + 1 * 16 + 32 + 8], xmm2
+	movups [rsp + 0 * 16 + 32 + 8], xmm3
 	lea rax, [IsExecutedPtr]
 	mov rax, [rax]
 	db 0F0h ; interlocked increment execution counter
 	inc qword ptr [rax]
 	
 ; is a user handler available?
-	cmp qword ptr[NewProc], 0
+	cmp qword ptr[HookProc], 0
 	
 	db 3Eh ; branch usually taken
 	jne CALL_NET_ENTRY
@@ -206,11 +204,11 @@ IsExecutedPtr:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; call hook handler or original method...
 CALL_NET_ENTRY:	
 
-	
+
 ; call NET intro
 	lea rcx, [IsExecutedPtr + 8] ; Hook handle (only a position hint)
-	mov rdx, qword ptr [rsp + 32 + 4 * 16 + 4 * 8] ; push return address
-	lea r8, qword ptr [rsp + 32 + 4 * 16 + 4 * 8] ; push address of return address
+	mov rdx, qword ptr [rsp + 4 * 16 + 32 + 6 * 8] ; push return address
+	lea r8, qword ptr  [rsp + 4 * 16 + 32 + 6 * 8] ; push address of return address
 	call qword ptr [NETIntro] ; Hook->NETIntro(Hook, RetAddr, InitialRSP);
 	
 ; should call original method?
@@ -228,17 +226,39 @@ CALL_NET_ENTRY:
 		lea rax, [OldProc]
 		jmp TRAMPOLINE_EXIT
 		
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; generic outro for both cases...
+TRAMPOLINE_EXIT:
+
+	movups xmm3, [rsp + 0 * 16 + 32 + 8 ]
+	movups xmm2, [rsp + 1 * 16 + 32 + 8 ]
+	movups xmm1, [rsp + 2 * 16 + 32 + 8 ]
+	movups xmm0, [rsp + 3 * 16 + 32 + 8]
+	
+	lea     rsp,[rbp+16 * 4 + 32 + 8] ; used for Frame pointer epilogue
+	pop rbp                       ; pop frame pointer
+	pop r9
+	pop r8
+	pop rdx
+	pop rcx
+
+	jmp qword ptr[rax] ; ATTENTION: In case of hook handler we will return to CALL_NET_OUTRO, otherwise to the caller...
+
 CALL_HOOK_HANDLER:
 ; adjust return address
-	lea rax, [CALL_NET_OUTRO]
-	mov qword ptr [rsp + 32 + 4 * 16 + 4 * 8], rax
+	lea rax, [Trampoline_ASM_x64_Net_Outro]
+	mov qword ptr [rsp + 4 * 16 + 32 + 6 * 8], rax
 
 ; call hook handler
-	lea rax, [NewProc]
+	lea rax, [HookProc]
 	jmp TRAMPOLINE_EXIT 
+	
+Trampoline_ASM_x64 ENDP
 
-CALL_NET_OUTRO: ; this is where the handler returns...
 
+public Trampoline_ASM_x64_Net_Outro
+
+Trampoline_ASM_x64_Net_Outro PROC
+; this is where the handler returns...
 ; call NET outro
 	push 0 ; space for return address
 	push rax
@@ -248,7 +268,7 @@ CALL_NET_OUTRO: ; this is where the handler returns...
 	
 	lea rcx, [IsExecutedPtr + 8]  ; Param 1: Hook handle hint
 	lea rdx, [rsp + 56] ; Param 2: Address of return address
-	call qword ptr [NETOutro] ; Hook->NETOutro(Hook);
+	call qword ptr [HookOutro] ; Hook->HookOutro(Hook);
 	
 	lea rax, [IsExecutedPtr]
 	mov rax, [rax]
@@ -262,33 +282,14 @@ CALL_NET_OUTRO: ; this is where the handler returns...
 	
 ; finally return to saved return address - the caller of this trampoline...
 	ret
-	
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; generic outro for both cases...
-TRAMPOLINE_EXIT:
 
-	add rsp, 32 + 16 * 4
-
-	movups xmm3, [rsp - 4 * 16]
-	movups xmm2, [rsp - 3 * 16]
-	movups xmm1, [rsp - 2 * 16]
-	movups xmm0, [rsp - 1 * 16]
-	
-	pop r9
-	pop r8
-	pop rdx
-	pop rcx
-	
-	jmp qword ptr[rax] ; ATTENTION: In case of hook handler we will return to CALL_NET_OUTRO, otherwise to the caller...
-	
-	
 ; outro signature, to automatically determine code size
 	db 78h
 	db 56h
 	db 34h
 	db 12h
 
-Trampoline_ASM_x64 ENDP
-
+Trampoline_ASM_x64_Net_Outro ENDP
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; HookInjectionCode_ASM_x64

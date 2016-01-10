@@ -105,6 +105,7 @@ DRIVER_SHARED_API(NTSTATUS, LhUninstallHook(TRACED_HOOK_HANDLE InHandle));
 
 DRIVER_SHARED_API(NTSTATUS, LhWaitForPendingRemovals());
 
+
 /*
     Setup the ACLs after hook installation. Please note that every
     hook starts suspended. You will have to set a proper ACL to
@@ -159,8 +160,8 @@ DRIVER_SHARED_API(NTSTATUS, LhWaitForPendingRemovals());
 				TRACED_HOOK_HANDLE InHook,
 				ULONG InThreadID,
 				BOOL* OutResult);
-
 #endif // !DRIVER
+
 
 /*
     The following barrier methods are meant to be used in hook handlers only!

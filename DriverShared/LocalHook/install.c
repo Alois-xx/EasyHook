@@ -24,18 +24,19 @@
 // about the project and latest updates.
 
 #include "stdafx.h"
+#include "ExceptionUnwind.h"
 
 // Disable warning C4276: no prototype provided; assumed no parameters
 // For ASM functions
 #pragma warning(disable: 4276)
 
-UCHAR* GetTrampolinePtr();
-ULONG GetTrampolineSize();
 
 LOCAL_HOOK_INFO             GlobalHookListHead;
 LOCAL_HOOK_INFO             GlobalRemovalListHead;
 RTL_SPIN_LOCK               GlobalHookLock;
 ULONG                       GlobalSlotList[MAX_HOOK_COUNT];
+UINT_PTR                    GlobalHookReturnAddresses[MAX_HOOK_COUNT];
+
 static LONG                 UniqueIDCounter = 0x10000000;
 
 void LhCriticalInitialize()
@@ -47,7 +48,7 @@ Description:
 */
     RtlZeroMemory(&GlobalHookListHead, sizeof(GlobalHookListHead));
     RtlZeroMemory(&GlobalRemovalListHead, sizeof(GlobalRemovalListHead));
-
+	RtlZeroMemory(&GlobalHookReturnAddresses[0], sizeof(GlobalHookReturnAddresses));
     RtlInitializeLock(&GlobalHookLock);
 }
 
@@ -88,9 +89,118 @@ Description:
     return TRUE;
 }
 
+void RegisterReturnAddres(LOCAL_HOOK_INFO *pHook)
+{
+	// Save NetOutro code address for later backpatching to make stackwalks possible after the intercepted method as been called
+	RtlAcquireLock(&GlobalHookLock);
+	{
+		int i = 0;
+		for (i = 0; i < MAX_HOOK_COUNT; i++)
+		{
+			if (GlobalHookReturnAddresses[i] == 0)
+			{
+				GlobalHookReturnAddresses[i] = (UINT_PTR)(pHook + 1) + (GetNetOutroPtr() - GetTrampolinePtr());
+				break;
+			}
+		}
+		ASSERT(i != MAX_HOOK_COUNT, L"Could not insert .NET outro pointer!");
+	}
+	RtlReleaseLock(&GlobalHookLock);
+}
 
+#ifdef _M_X64
+// AddUnwindInfos makes debugging with full call stack possible when entering the dynamically generate assembly code up to a certain point
+// when the stack return address is overwritten. Because the backpatch handler will call a method to patch the stack return address back we
+// get under x64 by definition unwalkable stacks. 
+// That problem could be circumvented by creating synthetic stack frames while copying the local data but that would be very complex and I am not even
+// sure if this can ever work reliable. Instead we backpatch the original return address in LhBarrierBeginStackTrace even when we are not inside
+// the hook handler which was a limitation of the original EasyHook implementation. 
+// That prevented us from getting the callstack after we have called the original method to inspect the return code, or returned handle, ... to tracie
+// it via ETW events which need a walkable stack.
+void AddUnwindInfos(LOCAL_HOOK_INFO *pHook, int trampolineSize)
+{
+	// Everything defined here is tightly coupled to the function prolog of Trampoline_ASM_x64
+	// If you change the code of the trampoline you need to adjust the offsets and codes here as well or x64 stackwalks will break!
+	// Usually I look at the disassembled code in Windbg and then calculate the offsets by OffsetOf(NextInstructionAfterStackAllocation) - MethodStart
+	//
+	//	00007ff8`883c0298 488bc4          mov     rax,rsp  .CodeOffset 0
+	//	00007ff8`883c029b 51              push    rcx      29c-298 = .CodeOffset = 4  (  = Offset next instruction - method entry )
+	//	00007ff8`883c029c 52              push    rdx    ...
+	//	00007ff8`883c029d 4150            push    r8
+	//	00007ff8`883c029f 4151            push    r9
+	//	00007ff8`883c02a1 55              push    rbp
+	
+	#define TrampolineUnwindCodesCount  15
 
+	// this initializer only works in C. C++ has no good initializer syntax for structs/unions!
+	const UNWIND_CODE TrampolineUnwindCodes[TrampolineUnwindCodesCount] = {
+		{ .CodeOffset = 38,  .UnwindOp = UWOP_SAVE_XMM128, .OpInfo = XMM3    },  // movups  xmmword ptr [rsp+50h],xmm3
+	    { .FrameOffset = 5                                                   },
+		{ .CodeOffset = 33,  .UnwindOp = UWOP_SAVE_XMM128, .OpInfo = XMM2,   },  // movups  xmmword ptr[rsp + 40h], xmm2
+		{ .FrameOffset = 4                                                   },
+		{ .CodeOffset = 28,  .UnwindOp = UWOP_SAVE_XMM128, .OpInfo = XMM1,   },  //  movups  xmmword ptr[rsp + 30h], xmm1
+		{ .FrameOffset = 3                                                   },
+		{ .CodeOffset = 23,  .UnwindOp = UWOP_SAVE_XMM128, .OpInfo = XMM0,   },  //  movups  xmmword ptr[rsp + 20h], xmm0
+		{ .FrameOffset = 2                                                   },
+		{ .CodeOffset = 18,  .UnwindOp = UWOP_SET_FPREG,   .OpInfo = 0       },  // lea     rbp,[rsp]
+		{ .CodeOffset = 14,  .UnwindOp = UWOP_ALLOC_SMALL, .OpInfo = 12      },  // sub     rsp,68h => OpInfo=12 = 12*8+8  alloc size is stored in OpInfo 
+																		         //  https://msdn.microsoft.com/en-us/library/ck9asaa9.aspx - Allocate a small - sized area on the stack.The size of the allocation is the operation info field * 8 + 8, allowing allocations from 8 to 128 bytes.		                                                                
+		{ .CodeOffset = 10,  .UnwindOp = UWOP_PUSH_NONVOL, .OpInfo = RBP     },  // push rbp
+		{ .CodeOffset = 9,   .UnwindOp = UWOP_PUSH_NONVOL, .OpInfo = R9      },  // push r9
+		{ .CodeOffset = 7,   .UnwindOp = UWOP_PUSH_NONVOL, .OpInfo = R8      },  // push r8
+		{ .CodeOffset = 5,   .UnwindOp = UWOP_PUSH_NONVOL, .OpInfo = RDX     },  // push rdx 
+		{ .CodeOffset = 4,   .UnwindOp = UWOP_PUSH_NONVOL, .OpInfo = RCX     },  // push rcx 
+	};
 
+	memcpy(&pHook->Trampoline_UnwindInfo.UnwindCode[0], TrampolineUnwindCodes, sizeof(TrampolineUnwindCodes));
+
+	PUNWIND_INFO pUnwindInfo = &pHook->Trampoline_UnwindInfo;
+
+	pUnwindInfo->FrameOffset = 0;
+	pUnwindInfo->FrameRegister = RBP;
+	pUnwindInfo->Version = 1;
+	pUnwindInfo->SizeOfProlog = 45;
+	pUnwindInfo->CountOfUnwindCodes = TrampolineUnwindCodesCount;
+	pUnwindInfo->Flags = UNW_FLAG_NHANDLER;
+
+	// _IMAGE_RUNTIME_FUNCTION_ENTRY addresses are relative addresses to the base address we choose in RtlAddFunctionTable
+	// pHook points to the start of the newly allocated page for our trampoline code
+	// After pHook comes the trampoline code for which we need to register unwind information
+	pHook->Trampoline_RuntimeFunction.BeginAddress = (DWORD) (pHook->Trampoline - (byte *)pHook);
+	pHook->Trampoline_RuntimeFunction.EndAddress = pHook->Trampoline_RuntimeFunction.BeginAddress + 177; // 177 is correct offset pointing to the next instruction after the final ret/jmp statement
+	pHook->Trampoline_RuntimeFunction.UnwindInfoAddress = (DWORD) ((byte*)&pHook->Trampoline_UnwindInfo - (byte *)pHook);
+
+	BOOLEAN lret = RtlAddFunctionTable(&pHook->Trampoline_RuntimeFunction, 1, (DWORD64) pHook);
+	ASSERT(lret, L"RTLAddFunctionTable failed");
+
+	#define NetOutroUnwindCodeCount  5
+
+	// Register unwind codes for .NET Outro function
+	pUnwindInfo = &pHook->Trampoline_Net_Outro_UnwindInfo;
+	pUnwindInfo->FrameOffset = 0;
+	pUnwindInfo->FrameRegister = 0;
+	pUnwindInfo->Version = 1;
+	pUnwindInfo->SizeOfProlog = 12;
+	pUnwindInfo->CountOfUnwindCodes = NetOutroUnwindCodeCount;
+	pUnwindInfo->Flags = UNW_FLAG_NHANDLER;
+
+	const UNWIND_CODE NetOutroUwindCodes[NetOutroUnwindCodeCount] = {
+		{ .CodeOffset = 12, .UnwindOp = UWOP_SAVE_XMM128, .OpInfo = XMM0,  },  // movups  xmmword ptr[rsp + 20h], xmm0
+		{ .FrameOffset = 1                                                 },
+	    { .CodeOffset = 7,  .UnwindOp = UWOP_ALLOC_SMALL, .OpInfo = 5      },  // sub     rsp,30h   alloc size is stored in OpInfo and is 8*11+8 per definition of 
+	    { .CodeOffset = 3,  .UnwindOp = UWOP_PUSH_NONVOL, .OpInfo = RAX    },  // push rax
+		{ .CodeOffset = 2,  .UnwindOp = UWOP_ALLOC_SMALL, .OpInfo = 0      }  // push 0
+	};
+
+	memcpy(&pHook->Trampoline_Net_Outro_UnwindInfo.UnwindCode[0], NetOutroUwindCodes, sizeof(NetOutroUwindCodes));
+	pHook->Trampoline_Net_Outro_RuntimeFunction.BeginAddress = pHook->Trampoline_RuntimeFunction.BeginAddress + (DWORD) (GetNetOutroPtr()  - GetTrampolinePtr());
+	pHook->Trampoline_Net_Outro_RuntimeFunction.EndAddress = pHook->Trampoline_Net_Outro_RuntimeFunction.BeginAddress + 55;
+	pHook->Trampoline_Net_Outro_RuntimeFunction.UnwindInfoAddress = (DWORD)  ((byte*)pUnwindInfo - (byte *)pHook);
+	lret = RtlAddFunctionTable(&pHook->Trampoline_Net_Outro_RuntimeFunction, 1, (DWORD64)pHook);
+
+	ASSERT(lret, L"RTLAddFunctionTable failed");
+}
+#endif
 
 EASYHOOK_NT_INTERNAL LhAllocateHook(
             void* InEntryPoint,
@@ -227,6 +337,12 @@ Returns:
 
     RtlCopyMemory(Hook->Trampoline, GetTrampolinePtr(), GetTrampolineSize());
 
+#if _M_X64
+	AddUnwindInfos(Hook, GetTrampolineSize());
+#endif
+
+	RegisterReturnAddres(Hook);  // needed for stackwalks outside hook handler
+
     /*
 	    Relocate entry point (the same for both archs)
 	    Has to be written directly into the target buffer, because to
@@ -291,7 +407,7 @@ Returns:
 	    /*NewProc*/			case 0x1A2B3C00: *((ULONG*)Ptr) = (ULONG)Hook->HookProc; break;
 	    /*UnmanagedOutro*/	case 0x1A2B3C06: *((ULONG*)Ptr) = (ULONG)Hook->HookOutro; break;
 	    /*IsExecuted*/		case 0x1A2B3C02: *((ULONG*)Ptr) = (ULONG)Hook->IsExecutedPtr; break;
-	    /*RetAddr*/			case 0x1A2B3C04: *((ULONG*)Ptr) = (ULONG)(Hook->Trampoline + 92); break;
+	    /*RetAddr*/			case 0x1A2B3C04: *((ULONG*)Ptr) = (ULONG)(Hook->Trampoline + 94); break;
 	    }
 
 	    Ptr++;
@@ -529,6 +645,27 @@ static ULONG ___TrampolineSize = 0;
 	EXTERN_C void __stdcall Trampoline_ASM_x86();
 #endif
 
+
+#ifdef _M_X64
+	EXTERN_C void __stdcall Trampoline_ASM_x64_Net_Outro();
+#else 
+	EXTERN_C void __stdcall Trampoline_ASM_x86_Net_Outro();
+#endif
+
+UCHAR* GetNetOutroPtr()
+{
+#ifdef _M_X64
+	UCHAR* Ptr = (UCHAR*)Trampoline_ASM_x64_Net_Outro;
+#else
+	UCHAR* Ptr = (UCHAR*)Trampoline_ASM_x86_Net_Outro;
+#endif
+
+	if (*Ptr == 0xE9)
+		Ptr += *((int*)(Ptr + 1)) + 5;
+	return Ptr;
+}
+
+
 UCHAR* GetTrampolinePtr()
 {
 // bypass possible Visual Studio debug jump table
@@ -541,11 +678,7 @@ UCHAR* GetTrampolinePtr()
 	if(*Ptr == 0xE9)
 		Ptr += *((int*)(Ptr + 1)) + 5;
 
-#ifdef _M_X64
-	return Ptr + 5 * 8;
-#else
 	return Ptr;
-#endif
 }
 
 ULONG GetTrampolineSize()

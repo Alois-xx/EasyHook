@@ -804,12 +804,12 @@ namespace EasyHook
             IntPtr Module = NativeAPI.GetModuleHandle(InModule);
 
             if (Module == IntPtr.Zero)
-                throw new DllNotFoundException("The given library is not loaded into the current process.");
+                throw new DllNotFoundException(String.Format("The library {0} is not loaded into the current process {1}.", InModule, Process.GetCurrentProcess().ProcessName));
 
             IntPtr Method = NativeAPI.GetProcAddress(Module, InSymbolName);
 
             if (Method == IntPtr.Zero)
-                throw new MissingMethodException("The given method does not exist.");
+                throw new MissingMethodException(String.Format("The method {0} was not found in module {1} via GetProcAddress. Check if the method is really exported under this name. Check with depends.exe xxxx.dll/.exe the epxorted method names.", InSymbolName, InModule));
 
             return Method;
         }
