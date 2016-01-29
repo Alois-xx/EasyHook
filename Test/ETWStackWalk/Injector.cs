@@ -5,6 +5,7 @@ using System.Threading;
 using System.Runtime.InteropServices;
 using EasyHook;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 
 namespace ETWStackwalk
 {
@@ -21,6 +22,7 @@ namespace ETWStackwalk
         LocalHook Func4Hook;
         LocalHook Func8Hook;
         LocalHook Func9Hook;
+        LocalHook FuncETWHook;
 
         Stack<String> Queue = new Stack<String>();
 
@@ -116,7 +118,10 @@ namespace ETWStackwalk
                     case Program.Func9:
                         Func9Hook = LocalHook.Create(LocalHook.GetProcAddress("UnmanagedWithExports.exe", "Func9"), new Func9Delegate(Func9_Hooked), this);
                         Func9Hook.ThreadACL.SetExclusiveACL(new int[] { 0 });
-                        Func9Hook.Dispose();
+                        break;
+                    case Program.FuncETW:
+                        FuncETWHook = LocalHook.Create(LocalHook.GetProcAddress("UnmanagedWithExports.exe", "FuncETW"), new FuncETWDelegate(FuncETW_Hooked), this);
+                        FuncETWHook.ThreadACL.SetExclusiveACL(new int[] { 0 });
                         break;
                     default:
                         break;
@@ -125,6 +130,56 @@ namespace ETWStackwalk
             }
         }
 
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode, SetLastError = true)]
+        unsafe delegate int FuncETWDelegate(int* a, int* b, int* c, int* d, int* e);
+
+        [DllImport("UnmanagedWithExports.exe", CharSet = CharSet.Unicode, SetLastError = true, CallingConvention = CallingConvention.StdCall)]
+        unsafe static extern int FuncETW(int* a, int* b, int* c, int* d, int* e);
+
+        [ThreadStatic]
+        static IntPtr backup;
+
+        static Random Rand = new Random();
+        static int CallCounter = 0;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void OtherHandleFreeMethod(ulong handle)
+        {
+            TestProvider.EventWriteFreeHandle(handle, AllocSize: 0, Allocator: "FuncETW");
+        }
+
+        /// <summary>
+        /// Test leak handle tracking with ETW events by writing for each call an Alloc Event with size 1 and to keep things simple
+        /// a FreeEvent with an allocsize of -1 which should balance out for each handle the total allocation size per handle.
+        /// To simulate a leak we free for every 500th event with an alloc size of 0 in a different method which can then be easily diagnosed 
+        /// within WPA if the ETW events were recorded.
+        /// </summary>
+        unsafe static int FuncETW_Hooked(int* a, int* b, int* c, int* d, int* e)
+        {
+            try
+            {
+                int lret = FuncETW(a, b, c, d, e);
+                NativeAPI.LhBarrierBeginStackTrace(out backup);
+                ulong handle = (ulong) Rand.Next();
+                CallCounter++;
+                TestProvider.EventWriteAllocateHandle(handle, AllocSize: 1, Allocator: "FuncETW");
+                if (CallCounter % 500 == 0) // simulate handle leak at every 500th call where we free with a different weight
+                {
+                    OtherHandleFreeMethod(handle);
+                }
+                else
+                {
+                    TestProvider.EventWriteFreeHandle(handle, AllocSize: -1, Allocator: "FuncETW");
+                }
+            }
+            finally
+            {
+                NativeAPI.LhBarrierEndStackTrace(backup);
+            }
+
+            return 0;
+        }
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode, SetLastError = true)]
         unsafe delegate int Func9Delegate(int* a, int* b, int* c, int* d, int* e, int* f, int* g, int* h, int *i);

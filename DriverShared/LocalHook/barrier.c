@@ -51,7 +51,7 @@ typedef struct _THREAD_RUNTIME_INFO_
 	RUNTIME_INFO*		Current;
 	void*				Callback;
 	BOOL				IsProtected;
-	PUINT_PTR           FirstHookReturnAddress;   // address of Trampoline_ASM_x64_Net_Outro which is set after the hooked method has been intercepted
+	UINT_PTR            FirstHookReturnAddress;   // actual address of Trampoline_ASM_x64_Net_Outro which is set after the hooked method has been intercepted
 	int                 ReentrantCounter;         // Further recursive hook invocations only increment the counter but to not overwrite the FirstHookReturnAddress
 	PUINT_PTR           StackPointerOfReplacedReturnAddress;    // This is set if LhBarrierBeginStackTrace was called outside a hook handler to allow stack traces even outside a hook handler
 	int                 LastStackIndex;           // RSP relative index where the FirstHookReturnAddress was found last time to start searching the stack at the right location fast.
@@ -633,6 +633,7 @@ Description:
 
 THROW_OUTRO:
 FINALLY_OUTRO:
+	AddrOfRetAddr = NULL; // make sure that the return address is not kept in a stack local variable or we will backpatch the wrong memory location!
     return NtStatus;
 }
 
@@ -806,9 +807,9 @@ Description:
 			goto DONT_INTERCEPT;
 	}
 
-	if (Info->FirstHookReturnAddress == NULL)
+	if (Info->FirstHookReturnAddress == 0)
 	{
-		Info->FirstHookReturnAddress = (PUINT_PTR) InRetAddr;
+		Info->FirstHookReturnAddress = (UINT_PTR) InRetAddr;
 		Info->ReentrantCounter++;
 	}
 
@@ -911,9 +912,7 @@ NTSTATUS LhBackPatchHookReturnAddress(PVOID __in pOriginalStackAddress)
 	ASSERT(Info->StackPointerOfReplacedReturnAddress != NULL, L"ReplacedReturnAddress was null. Either LhBeginStacktrace was not called before or you did tinker with Easyhook source code in LhPatchHookReturnAddress.");
 	
 	PUINT_PTR pStack = Info->StackPointerOfReplacedReturnAddress;
-	printf("Patching Address: %p with value %p to %p", pStack, *pStack, pOriginalStackAddress);
 	*pStack = (UINT_PTR)pOriginalStackAddress; // overwrite return address of assembler stub 
-
 	Info->StackPointerOfReplacedReturnAddress = NULL; // reset it so we can track violators of the contract in LhBarrierIntro
 
 	return  STATUS_SUCCESS;
@@ -947,14 +946,12 @@ Retry:
 			}
 			else
 			{
-				ASSERT(FALSE, L"Did search entire stack for hook return addresses but did not find any.");
-				return STATUS_INTERNAL_ERROR;
+				ASSERT(FALSE, L"Did search entire stack for hook return addresses but did not find any. This usually indicates a problem in EasyHook.");
+				goto Exit;
 			}
 		}
 
 		address = *pCurrentStackPtr;
-		if( i == 0 )
-			printf("\nStackPtr: %p, Address: %p, HookReturnAddress: %p", pCurrentStackPtr, address, GlobalHookReturnAddresses[0]);
 
 		for (int k = 0; k < MAX_HOOK_COUNT; k++)
 		{
@@ -964,18 +961,18 @@ Retry:
 			}
 			else if( GlobalHookReturnAddresses[k]  == address) // we have found a candidate to overwrite
 			{
-				Info->LastStackIndex = i;                         // cache stack index which should be constant for all subsequent invocations. If not we search from the current stack backwards until we find it again
+				Info->LastStackIndex = i;                      // cache stack index which should be constant for all subsequent invocations. If not we search from the current stack backwards until we find it again
 				Info->StackPointerOfReplacedReturnAddress = pCurrentStackPtr;  // save stack patch location in TLS so we can patch it back again in LhBarrierEndStackTrace
 				*OriginalHookReturnAddress = (PVOID) *pCurrentStackPtr;     // write original return address as out argument which is later used to patch it back again.
-				*pCurrentStackPtr = *Info->FirstHookReturnAddress; // overwrite return address to enable proper x64 stackwalking in x86 this is not necessary to get proper ETW stackwalks
-				printf("\nFound at idx %d, StackPtr: %p", i, pCurrentStackPtr);
-				bFound = TRUE;
+				*pCurrentStackPtr = Info->FirstHookReturnAddress; // overwrite return address to enable proper x64 stackwalking in x86 this is not necessary to get proper ETW stackwalks
+				bFound++; 
 				break;
 			}
 		}
 
 	}
 
+Exit:
 	return bFound ? STATUS_SUCCESS : STATUS_INTERNAL_ERROR;
 }
 
@@ -1010,7 +1007,7 @@ Description:
 	Info->ReentrantCounter--;
 	if (Info->ReentrantCounter <= 0)
 	{
-		Info->FirstHookReturnAddress = NULL;
+		Info->FirstHookReturnAddress = 0;
 		Info->ReentrantCounter = 0;
 	}
 

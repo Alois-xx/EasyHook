@@ -21,13 +21,22 @@ namespace ETWStackwalk
                                "Injects an ETW tracer to external processes to find resource leaks. Works for x64 since Win 8 or later. Works for 32 bit processes since Windows 7." + Environment.NewLine +
                                "ETWStackWalk [-hook [createfile] [createwindow] [funcx]] [-debug] [-help] [-pid ddd] [-start executable with optionalargs]" + Environment.NewLine +
                                "   -help                 This message" + Environment.NewLine +
-                               "   -hook                 Hook specified methods to trace handle leaks. funcx is used for unit testing." + Environment.NewLine +
+                               "   -hook                 Hook specified methods to trace handle leaks (funcx methods are hooked for unit testing in conjunction with UnmangedHook.exe)." + Environment.NewLine +
                                "   -pid ddd              Hook into specified process" + Environment.NewLine +
-                               "   -start executable     Start executable and then hook after 5s to give it time to initialize" + Environment.NewLine +
-                               "   -noetw                Disable ETW recording. Used for unit testing" + Environment.NewLine +
-                               "   -debug                Used to debug EasyHook trampoline code. Hook notepad.exe and start Windbg of Windows 10 SDK.";
-
-
+                               "   -start executable     Start executable and then hook after 5s to give it time to initialize." + Environment.NewLine +
+                               "   -noetw                Disable ETW recording (used for unit testing)." + Environment.NewLine +
+                               "   -debug                Used to debug EasyHook trampoline code. Hook notepad.exe and start Windbg of Windows 10 SDK." + Environment.NewLine +
+                               "Examples: " + Environment.NewLine +
+                               "Monitor all CreateWindow/DestroyWind calls to detect window handle leaks in an already running application with process id ddd" + Environment.NewLine +
+                               " ETWStackWalk.exe -hook createwindow -pid dddd" + Environment.NewLine +
+                               "Monitor all CreateFile calls. There you can log e.g. return code, passed file name, flags and other flags of interest." + Environment.NewLine +
+                               " ETWStackWalk.exe -hook createfile -pid dddd" + Environment.NewLine +
+                               "Test hooking a method which writes if hooked an ETW event for every allocation and deallcation event to simulate a handle leak." + Environment.NewLine +
+                               " ETWStackWalk.exe -hook funcetw -start UnmanagedWithExports.exe 500000" + Environment.NewLine +
+                               "If something goes wrong you can directly debug it with Windbg if you have the Win10 SDK installed by adding the -debug switch" + Environment.NewLine +
+                               " ETWStackWalk.exe -hook funcetw -debug -start UnmanagedWithExports.exe 500000" + Environment.NewLine +
+                               "To check for stack corruptions caused by changes to EasyHook you can hook method with a different set of method arguments" + Environment.NewLine +
+                               " ETWStackWalk.exe -hook func0 func1 func4 func8 func9 -start UnmanagedWithExports.exe 0" + Environment.NewLine;
 
         static String ChannelName = null;
 
@@ -45,11 +54,14 @@ namespace ETWStackwalk
 
         public const string CreateFileHookName = "createfile";
         public const string CreateWindowHookName = "createwindow";
+        // Used for unit testing in conjunction with UnmanagedHook.exe to check for stack corruptions
+        // when a varying number of stack parameters are passed.
         public const string Func0 = "func0";
         public const string Func1 = "func1";
         public const string Func4 = "func4";
         public const string Func8 = "func8";
         public const string Func9 = "func9";
+        public const string FuncETW = "funcetw";
 
         int Pid = -1;
         bool ETWRecording = true;
@@ -268,7 +280,7 @@ namespace ETWStackwalk
                 Process.Start(debuggerPath, String.Format("-p {0} -c \".symfix;.reload;g\"", Pid));
             }
 
-                Console.WriteLine("Press enter to stop");
+            Console.WriteLine("Press enter to stop");
             Console.ReadLine();
         }
 
@@ -294,7 +306,6 @@ namespace ETWStackwalk
             Console.WriteLine("Stop ETW Recording and save data to {0}", Environment.ExpandEnvironmentVariables(@"%temp%\CreateFileLogs.etl"));
             Console.WriteLine("Open the file with WPA.exe and add Generic Events to your view. There TestProvider with the CreateFile Events should show up.");
             Console.WriteLine("Right click on the Generic Events columns to bring up the context menu. Select Open View Editor. Add the Stack field to your column selection and load the symbols.");
-            Console.WriteLine("If you now load the corresponding symbols you will see the call stacks for x86 processes but not for x64 processes.");
 
             // wpr -stop c:\temp\createfile.etl
             var stopInfo = new ProcessStartInfo("wpr.exe", String.Format("-stop {0}", Environment.ExpandEnvironmentVariables(@"%temp%\CreateFileLogs.etl")))

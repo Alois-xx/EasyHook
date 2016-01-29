@@ -4,6 +4,7 @@
     <EventCollector Id="EventCollector_MyEventSource" Name="TestProvider">
       <BufferSize Value="1024" />
       <Buffers Value="20" />
+      <!-- if you have really many hooked calls you need to increase the buffer from 20MB to e.g. 2 GB to store several million calls there. If you record to memory this will record to a ring buffer of this size!  -->
     </EventCollector>
     <EventProvider Id="TestProvider" Name="C0899B1A-6345-4E8F-9B6B-13E44A7ED5BA" Stack="true" /> <!--Stack="true"-->
 
