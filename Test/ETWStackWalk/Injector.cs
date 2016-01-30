@@ -146,7 +146,7 @@ namespace ETWStackwalk
         [MethodImpl(MethodImplOptions.NoInlining)]
         static void OtherHandleFreeMethod(ulong handle)
         {
-            TestProvider.EventWriteFreeHandle(handle, AllocSize: 0, Allocator: "FuncETW");
+            TestProvider.EventWriteReleaseResource(handle, AllocSize: 0, Allocator: "FuncETW");
         }
 
         /// <summary>
@@ -163,14 +163,14 @@ namespace ETWStackwalk
                 NativeAPI.LhBarrierBeginStackTrace(out backup);
                 ulong handle = (ulong) Rand.Next();
                 CallCounter++;
-                TestProvider.EventWriteAllocateHandle(handle, AllocSize: 1, Allocator: "FuncETW");
+                TestProvider.EventWriteAquireResource(handle, AllocSize: 1, Allocator: "FuncETW");
                 if (CallCounter % 500 == 0) // simulate handle leak at every 500th call where we free with a different weight
                 {
                     OtherHandleFreeMethod(handle);
                 }
                 else
                 {
-                    TestProvider.EventWriteFreeHandle(handle, AllocSize: -1, Allocator: "FuncETW");
+                    TestProvider.EventWriteReleaseResource(handle, AllocSize: -1, Allocator: "FuncETW");
                 }
             }
             finally
@@ -301,7 +301,7 @@ namespace ETWStackwalk
                 {
                     NativeAPI.LhBarrierBeginStackTrace(out backup);
                     TestProvider.EventWriteCreateFile(InFileName, (ulong)lret.ToInt64());
-                    TestProvider.EventWriteAllocateHandle((ulong)lret.ToInt64(), 1, "CreateFile");
+                    TestProvider.EventWriteAquireResource((ulong)lret.ToInt64(), 1, "CreateFile");
                 }
                 finally
                 {
@@ -354,7 +354,7 @@ namespace ETWStackwalk
             {
                 NativeAPI.LhBarrierBeginStackTrace(out backup);
 
-                TestProvider.EventWriteAllocateHandle((ulong)lret.ToInt64(), 1, "CreateWindowExW");
+                TestProvider.EventWriteAquireResource((ulong)lret.ToInt64(), 1, "CreateWindowExW");
             }
             finally
             {
@@ -376,7 +376,7 @@ namespace ETWStackwalk
         static bool DestroyWindow_Hooked(IntPtr hWnd)
         {
             bool lret = DestroyWindow(hWnd);
-            TestProvider.EventWriteFreeHandle((ulong)hWnd.ToInt64(), -1, "DestroyWindow");
+            TestProvider.EventWriteReleaseResource((ulong)hWnd.ToInt64(), -1, "DestroyWindow");
             return lret;
         }
     }

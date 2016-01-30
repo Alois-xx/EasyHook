@@ -126,6 +126,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <Content Include="easyhook.wpaProfile">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <None Include="ETW.man" />
     <None Include="StrongName.snk" />
     <Content Include="TestProvider.wprp">

@@ -34,24 +34,24 @@ using System.Security.Principal;
         //
         // Task :  eventGUIDs
         //
-        private static Guid AllocateHandleId = new Guid("ad14e1b1-04f6-480b-964a-4182f41a98ce");
-        private static Guid FreeHandleId = new Guid("8ad0f072-f6d8-4db1-8ade-b892b574d2b5");
+        private static Guid AquireId = new Guid("ad14e1b1-04f6-480b-964a-4182f41a98ce");
+        private static Guid ReleaseId = new Guid("8ad0f072-f6d8-4db1-8ade-b892b574d2b5");
 
         //
         // Event Descriptors
         //
         private static EventDescriptor CreateFile;
-        private static EventDescriptor AllocateHandle;
-        private static EventDescriptor FreeHandle;
+        private static EventDescriptor AquireResource;
+        private static EventDescriptor ReleaseResource;
 
 
         static TestProvider()
         {
             unchecked
             {
-                CreateFile = new EventDescriptor(0x0, 0x0, 0x0, 0x4, 0x0, 0x0, (long)0x0);
-                AllocateHandle = new EventDescriptor(0x1, 0x0, 0x0, 0x4, 0x1, 0x1, (long)0x0);
-                FreeHandle = new EventDescriptor(0x2, 0x0, 0x0, 0x4, 0x2, 0x2, (long)0x0);
+                CreateFile = new EventDescriptor(0x0, 0x1, 0x0, 0x4, 0x0, 0x0, (long)0x0);
+                AquireResource = new EventDescriptor(0x1, 0x1, 0x0, 0x4, 0x1, 0x1, (long)0x0);
+                ReleaseResource = new EventDescriptor(0x2, 0x1, 0x0, 0x4, 0x2, 0x2, (long)0x0);
             }
         }
 
@@ -71,9 +71,9 @@ using System.Security.Principal;
         }
 
         //
-        // Event method for AllocateHandle
+        // Event method for AquireResource
         //
-        public static bool EventWriteAllocateHandle(ulong Handle, long AllocSize, string Allocator)
+        public static bool EventWriteAquireResource(ulong Handle, long AllocSize, string Allocator)
         {
 
             if (!m_provider.IsEnabled())
@@ -81,13 +81,13 @@ using System.Security.Principal;
                 return true;
             }
 
-            return m_provider.TemplateAllocateHandle(ref AllocateHandle, Handle, AllocSize, Allocator);
+            return m_provider.TemplateResourceDefinition(ref AquireResource, Handle, AllocSize, Allocator);
         }
 
         //
-        // Event method for FreeHandle
+        // Event method for ReleaseResource
         //
-        public static bool EventWriteFreeHandle(ulong Handle, long AllocSize, string Allocator)
+        public static bool EventWriteReleaseResource(ulong Handle, long AllocSize, string Allocator)
         {
 
             if (!m_provider.IsEnabled())
@@ -95,7 +95,7 @@ using System.Security.Principal;
                 return true;
             }
 
-            return m_provider.TemplateFreeHandle(ref FreeHandle, Handle, AllocSize, Allocator);
+            return m_provider.TemplateResourceDefinition(ref ReleaseResource, Handle, AllocSize, Allocator);
         }
     }
 
@@ -151,43 +151,7 @@ using System.Security.Principal;
 
 
 
-        internal unsafe bool TemplateAllocateHandle(
-            ref EventDescriptor eventDescriptor,
-            ulong Handle,
-            long AllocSize,
-            string Allocator
-            )
-        {
-            int argumentCount = 3;
-            bool status = true;
-
-            if (IsEnabled(eventDescriptor.Level, eventDescriptor.Keywords))
-            {
-                byte* userData = stackalloc byte[sizeof(EventData) * argumentCount];
-                EventData* userDataPtr = (EventData*)userData;
-
-                userDataPtr[0].DataPointer = (UInt64)(&Handle);
-                userDataPtr[0].Size = (uint)(sizeof(long)  );
-
-                userDataPtr[1].DataPointer = (UInt64)(&AllocSize);
-                userDataPtr[1].Size = (uint)(sizeof(long)  );
-
-                userDataPtr[2].Size = (uint)(Allocator.Length + 1)*sizeof(char);
-
-                fixed (char* a0 = Allocator)
-                {
-                    userDataPtr[2].DataPointer = (ulong)a0;
-                    status = WriteEvent(ref eventDescriptor, argumentCount, (IntPtr)(userData));
-                }
-            }
-
-            return status;
-
-        }
-
-
-
-        internal unsafe bool TemplateFreeHandle(
+        internal unsafe bool TemplateResourceDefinition(
             ref EventDescriptor eventDescriptor,
             ulong Handle,
             long AllocSize,

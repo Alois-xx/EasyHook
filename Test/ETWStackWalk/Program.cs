@@ -17,17 +17,20 @@ namespace ETWStackwalk
 {
     class Program
     {
-        static readonly string Help = "ETWStackWalk.exe v" + GetVersion() + " by Alois Kraus 2015" + Environment.NewLine +
+        static readonly string Help = "ETWStackWalk.exe v" + GetVersion() + " by Alois Kraus 2016" + Environment.NewLine +
                                "Injects an ETW tracer to external processes to find resource leaks. Works for x64 since Win 8 or later. Works for 32 bit processes since Windows 7." + Environment.NewLine +
-                               "ETWStackWalk [-hook [createfile] [createwindow] [funcx]] [-debug] [-help] [-pid ddd] [-start executable with optionalargs]" + Environment.NewLine +
+                               "ETWStackWalk [-hook [createfile] [-outfile xxx.etl] [createwindow] [funcx]] [-debug] [-help] [-pid ddd] [-start executable with optionalargs]" + Environment.NewLine +
                                "   -help                 This message" + Environment.NewLine +
                                "   -hook                 Hook specified methods to trace handle leaks (funcx methods are hooked for unit testing in conjunction with UnmangedHook.exe)." + Environment.NewLine +
+                               "                         createwindow Intercept Create/DestroyWindow calls." + Environment.NewLine + 
+                               "                         createfile   Intercept CreateFile calls." + Environment.NewLine  + 
+                               "   -outfile xxxx.etl     Output file name to which the hook tracing data will be written to. Default is %temp%\\ResourceLeaks.etl" + Environment.NewLine + 
                                "   -pid ddd              Hook into specified process" + Environment.NewLine +
                                "   -start executable     Start executable and then hook after 5s to give it time to initialize." + Environment.NewLine +
                                "   -noetw                Disable ETW recording (used for unit testing)." + Environment.NewLine +
                                "   -debug                Used to debug EasyHook trampoline code. Hook notepad.exe and start Windbg of Windows 10 SDK." + Environment.NewLine +
                                "Examples: " + Environment.NewLine +
-                               "Monitor all CreateWindow/DestroyWind calls to detect window handle leaks in an already running application with process id ddd" + Environment.NewLine +
+                               "Monitor all CreateWindow/DestroyWindow calls to detect window handle leaks in an already running application with process id ddd" + Environment.NewLine +
                                " ETWStackWalk.exe -hook createwindow -pid dddd" + Environment.NewLine +
                                "Monitor all CreateFile calls. There you can log e.g. return code, passed file name, flags and other flags of interest." + Environment.NewLine +
                                " ETWStackWalk.exe -hook createfile -pid dddd" + Environment.NewLine +
@@ -37,6 +40,8 @@ namespace ETWStackwalk
                                " ETWStackWalk.exe -hook funcetw -debug -start UnmanagedWithExports.exe 500000" + Environment.NewLine +
                                "To check for stack corruptions caused by changes to EasyHook you can hook method with a different set of method arguments" + Environment.NewLine +
                                " ETWStackWalk.exe -hook func0 func1 func4 func8 func9 -start UnmanagedWithExports.exe 0" + Environment.NewLine;
+
+        static string OutputETWFileName = Environment.ExpandEnvironmentVariables(@"%temp%\ResourceLeaks.etl");
 
         static String ChannelName = null;
 
@@ -100,6 +105,18 @@ namespace ETWStackwalk
                             throw new NotSupportedException("Command line argument -hook expects additional arguments.");
                         }
                         Action = ProgramAction.Hook;
+                        break;
+                    case "-outfile":
+                        var fileName = GetArgParameters(argQueue);
+                        if( fileName.Count == 0 )
+                        {
+                            throw new NotSupportedException("You need to specify an output file name for the argument -outfile.");
+                        }
+                        if( fileName.Count > 1)
+                        {
+                            throw new NotSupportedException(String.Format("Too many output file names for argument -outfile: {0}", String.Join(" ", fileName)));
+                        }
+                        OutputETWFileName = fileName[0];
                         break;
                     case "-start":
                         ExeArgs = new List<string>();
@@ -284,9 +301,10 @@ namespace ETWStackwalk
             Console.ReadLine();
         }
 
-         private static void StartETWRecording()
+        private static void StartETWRecording()
         {
-            Console.WriteLine("Start ETW Recording. You need the Windows Performance Toolkit installed (preferably from Windows 10 SDK).");
+            CanStartETWRecording();
+            Console.WriteLine("Start ETW Recording ...");
 
             // wpr.exe -start GeneralProfile -start TestProvider.wprp
             // Start ETW Recording
@@ -297,18 +315,35 @@ namespace ETWStackwalk
             };
 
             var p = Process.Start(info);
-            Console.WriteLine("WPR Output: {0}", p.StandardOutput.ReadToEnd());
+            string wprStartOutput = p.StandardOutput.ReadToEnd().Trim( new char[] { '\t', ' ', '\r', '\n' });
+            if (!String.IsNullOrEmpty(wprStartOutput))
+            {
+                Console.WriteLine("WPR Output: {0}", wprStartOutput);
+            }
             p.WaitForExit();
+        }
+
+        static void CanStartETWRecording()
+        {
+            try
+            {
+                using (var p = Process.Start("wpr.exe"))
+                {
+                }
+            }
+            catch (Exception)
+            {
+                Process.Start("https://dev.windows.com/en-us/downloads/windows-10-sdk");
+                throw new NotSupportedException("Please install Windows Performance Toolkit (and Windbg if you want to use the -debug switch) from Windows 10 SDK.");
+            }
         }
 
         private static void StopETWRecording()
         {
-            Console.WriteLine("Stop ETW Recording and save data to {0}", Environment.ExpandEnvironmentVariables(@"%temp%\CreateFileLogs.etl"));
-            Console.WriteLine("Open the file with WPA.exe and add Generic Events to your view. There TestProvider with the CreateFile Events should show up.");
-            Console.WriteLine("Right click on the Generic Events columns to bring up the context menu. Select Open View Editor. Add the Stack field to your column selection and load the symbols.");
+            Console.WriteLine("Stopping ETW Recording. This can take some minutes ...");
 
             // wpr -stop c:\temp\createfile.etl
-            var stopInfo = new ProcessStartInfo("wpr.exe", String.Format("-stop {0}", Environment.ExpandEnvironmentVariables(@"%temp%\CreateFileLogs.etl")))
+            var stopInfo = new ProcessStartInfo("wpr.exe", String.Format("-stop {0}", OutputETWFileName))
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -316,8 +351,11 @@ namespace ETWStackwalk
             };
             var stopRecording = Process.Start(stopInfo);
             Task<string> stderrTask = Task.Factory.StartNew(() => stopRecording.StandardError.ReadToEnd());
-            Console.WriteLine("Stop WPR Output: {0}", stopRecording.StandardOutput.ReadToEnd());
+            string stdout = stopRecording.StandardOutput.ReadToEnd();
+            string formattedout = String.Join(Environment.NewLine + "\t\t", stdout.Split(Environment.NewLine.ToCharArray(), StringSplitOptions.RemoveEmptyEntries));
+            Console.WriteLine("\tStop WPR Output: {0}", formattedout);
             stderrTask.Wait();
+            Console.WriteLine("Start Analysis with wpa {0} -profile easyhook.wpaprofile", OutputETWFileName);
             if( !String.IsNullOrEmpty(stderrTask.Result) )
             {
                 Console.WriteLine("WPR Error: {0}", stderrTask.Result);
