@@ -163,7 +163,7 @@ namespace ETWStackwalk
                 NativeAPI.LhBarrierBeginStackTrace(out backup);
                 ulong handle = (ulong) Rand.Next();
                 CallCounter++;
-                TestProvider.EventWriteAquireResource(handle, AllocSize: 1, Allocator: "FuncETW");
+                TestProvider.EventWriteAcquireResource(handle, AllocSize: 1, Allocator: "FuncETW");
                 if (CallCounter % 500 == 0) // simulate handle leak at every 500th call where we free with a different weight
                 {
                     OtherHandleFreeMethod(handle);
@@ -301,7 +301,7 @@ namespace ETWStackwalk
                 {
                     NativeAPI.LhBarrierBeginStackTrace(out backup);
                     TestProvider.EventWriteCreateFile(InFileName, (ulong)lret.ToInt64());
-                    TestProvider.EventWriteAquireResource((ulong)lret.ToInt64(), 1, "CreateFile");
+                    TestProvider.EventWriteAcquireResource((ulong)lret.ToInt64(), 1, "CreateFile");
                 }
                 finally
                 {
@@ -354,7 +354,7 @@ namespace ETWStackwalk
             {
                 NativeAPI.LhBarrierBeginStackTrace(out backup);
 
-                TestProvider.EventWriteAquireResource((ulong)lret.ToInt64(), 1, "CreateWindowExW");
+                TestProvider.EventWriteAcquireResource((ulong)lret.ToInt64(), 1, "CreateWindowExW");
             }
             finally
             {

@@ -34,14 +34,14 @@ using System.Security.Principal;
         //
         // Task :  eventGUIDs
         //
-        private static Guid AquireId = new Guid("ad14e1b1-04f6-480b-964a-4182f41a98ce");
+        private static Guid AcquireId = new Guid("ad14e1b1-04f6-480b-964a-4182f41a98ce");
         private static Guid ReleaseId = new Guid("8ad0f072-f6d8-4db1-8ade-b892b574d2b5");
 
         //
         // Event Descriptors
         //
         private static EventDescriptor CreateFile;
-        private static EventDescriptor AquireResource;
+        private static EventDescriptor AcquireResource;
         private static EventDescriptor ReleaseResource;
 
 
@@ -50,7 +50,7 @@ using System.Security.Principal;
             unchecked
             {
                 CreateFile = new EventDescriptor(0x0, 0x1, 0x0, 0x4, 0x0, 0x0, (long)0x0);
-                AquireResource = new EventDescriptor(0x1, 0x1, 0x0, 0x4, 0x1, 0x1, (long)0x0);
+                AcquireResource = new EventDescriptor(0x1, 0x1, 0x0, 0x4, 0x1, 0x1, (long)0x0);
                 ReleaseResource = new EventDescriptor(0x2, 0x1, 0x0, 0x4, 0x2, 0x2, (long)0x0);
             }
         }
@@ -71,9 +71,9 @@ using System.Security.Principal;
         }
 
         //
-        // Event method for AquireResource
+        // Event method for AcquireResource
         //
-        public static bool EventWriteAquireResource(ulong Handle, long AllocSize, string Allocator)
+        public static bool EventWriteAcquireResource(ulong Handle, long AllocSize, string Allocator)
         {
 
             if (!m_provider.IsEnabled())
@@ -81,7 +81,7 @@ using System.Security.Principal;
                 return true;
             }
 
-            return m_provider.TemplateResourceDefinition(ref AquireResource, Handle, AllocSize, Allocator);
+            return m_provider.TemplateResourceDefinition(ref AcquireResource, Handle, AllocSize, Allocator);
         }
 
         //
